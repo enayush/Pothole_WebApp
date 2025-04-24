@@ -108,34 +108,92 @@ async function predictWebcam() {
 
 // Implement this function based on your model's output
 function processModelOutput(predictions) {
-    // Example: Check if a 'pothole' class score is above a threshold
-    // This is placeholder logic! Replace with your model's specific output handling.
-    console.log("Model predictions:", predictions); // Log output to understand its structure
-    // Based on console output, access prediction data
-    // e.g., if output is [scoreTensor, classTensor] for a single object
-    // const score = predictions[0].dataSync()[0]; // Get first score
-    // return score > 0.7; // Example threshold
+    // --- Step 1: Log and inspect the 'predictions' variable ---
+    console.log("--- Inspecting TF.js predictions ---");
+    console.log("Predictions variable type:", typeof predictions);
+    console.log("Is predictions an Array?", Array.isArray(predictions));
 
-    // If your model just outputs a single value (like confidence), use that
-    // const confidence = predictions[0].dataSync()[0];
-    // return confidence > 0.5;
+    if (Array.isArray(predictions)) {
+        console.log("Predictions is an array. Length:", predictions.length);
+        // If it's an array, iterate through items and log their types/shapes
+        predictions.forEach((tensor, index) => {
+            console.log(`  Item ${index}:`, tensor);
+            if (tensor && typeof tensor.shape !== 'undefined') {
+                console.log(`    Shape:`, tensor.shape);
+                console.log(`    Is Tensor?`, tensor instanceof tf.Tensor);
+                // WARNING: Calling .arraySync() or .dataSync() on large tensors can freeze the browser!
+                // Only use on small or known tensors for debugging.
+                // console.log(`    Data (first few):`, tensor.dataSync().slice(0, 10));
+            } else {
+                console.log("    Item is not a Tensor or has no shape.");
+            }
+        });
+    } else if (predictions && typeof predictions.shape !== 'undefined') {
+        console.log("Predictions is a single Tensor.");
+        console.log("  Shape:", predictions.shape);
+        console.log(`  Is Tensor?`, predictions instanceof tf.Tensor);
+        // WARNING: Calling .arraySync() or .dataSync() on large tensors can freeze the browser!
+        // Only use on small or known tensors for debugging.
+        // console.log(`    Data (first few):`, predictions.dataSync().slice(0, 10));
+    } else {
+        console.log("Predictions is not an array or a Tensor:", predictions);
+    }
+    console.log("--- End Inspection ---");
 
-    // If it's object detection and predictions is an array of tensors like [boxes, classes, scores, num_detections]
-    // const numDetections = predictions[3].dataSync()[0];
-    // const detectionClasses = predictions[1].dataSync();
-    // let potholeCount = 0;
-    // for(let i = 0; i < numDetections; ++i) {
-    //     if (detectionClasses[i] === YOUR_POTHOLE_CLASS_ID) { // Replace with the ID your model uses for 'pothole'
-    //         potholeCount++;
+
+    // --- Step 2: Based on console output, write the actual logic ---
+    // This part MUST be written by you after you see the console logs from Step 1.
+    // Example (assuming it returns an array where the first item is scores and second is boxes):
+    // if (Array.isArray(predictions) && predictions.length >= 2 &&
+    //     predictions[0] instanceof tf.Tensor && predictions[1] instanceof tf.Tensor) {
+    //     const scores = predictions[0].dataSync(); // Get scores as a JS array
+    //     const boxes = predictions[1].dataSync();   // Get boxes as a JS array (flat array)
+    //     // Now loop through scores and boxes to find detections above a threshold
+    //     let detected_count = 0;
+    //     let primary_bbox = null;
+    //     let primary_confidence = null;
+    //     const threshold = 0.5; // Match your model's expected threshold or adjust
+    //     for (let i = 0; i < scores.length; i++) {
+    //         if (scores[i] > threshold) {
+    //             detected_count++;
+    //             if (primary_bbox === null) {
+    //                 // Assuming boxes are [y1, x1, y2, x2] or [x1, y1, x2, y2] in normalized [0,1] format
+    //                 // You'll need to know your model's output format!
+    //                 const box = boxes.slice(i * 4, i * 4 + 4); // Extract box coords for this detection
+    //                 // Convert normalized coords [0,1] to pixel coords [0, videoWidth/Height]
+    //                 const videoWidth = video.videoWidth;
+    //                 const videoHeight = video.videoHeight;
+    //                 // Example for [y1, x1, y2, x2] format:
+    //                 // const x_min = box[1] * videoWidth;
+    //                 // const y_min = box[0] * videoHeight;
+    //                 // const x_max = box[3] * videoWidth;
+    //                 // const y_max = box[2] * videoHeight;
+    //                 // Example for [x1, y1, x2, y2] format:
+    //                 const x_min = box[0] * videoWidth;
+    //                 const y_min = box[1] * videoHeight;
+    //                 const x_max = box[2] * videoWidth;
+    //                 const y_max = box[3] * videoHeight;
+    //                 primary_bbox = [x_min, y_min, x_max, y_max]; // Store as pixel values
+    //                 primary_confidence = scores[i];
+    //             }
+    //         }
     //     }
-    // }
-    // return potholeCount;
+    //     // Return structure expected by displayDetectionResults if it's called with this output
+    //     // Or just return the processed data you need for your logic
+    //     return { detection_count: detected_count, primary_bbox: primary_bbox, primary_confidence: primary_confidence };
 
-    // *** Placeholder: Assuming just a boolean detection ***
-    // A simple placeholder - you MUST replace this with actual logic
-    // Maybe your model outputs a single probability tensor?
-    const probability = predictions[0].dataSync()[0]; // Example: Assuming first output is a probability score
-    return probability > 0.5; // Simple threshold
+    // } else {
+    //    console.warn("Unexpected predictions format:", predictions);
+    return { detection_count: 0, primary_bbox: null, primary_confidence: null }; // Return no detections if format is unexpected
+    // }
+
+
+    // --- Step 3: Remove or comment out Step 1 logging once you know the structure ---
+    // And uncomment Step 2 logic.
+
+    // *** Placeholder return (will not work) ***
+    // const probability = predictions[0].dataSync()[0]; // REMOVE or COMMENT OUT
+    // return probability > 0.5; // REMOVE or COMMENT OUT
 }
 
 // Implement this function to draw results on the canvas
