@@ -8,11 +8,13 @@ WORKDIR /app
 COPY requirements.txt .
 RUN pip install --no-cache-dir -r requirements.txt
 
-# Copy the application code and database file
+# Copy the application code
+# Removed the problematic COPY database.db line
 COPY app.py .
-COPY database.db . || echo "database.db not found, will be created on first run" # Copy if exists, ok if not
 
-# Ensure the database file is writable (optional, but good practice if starting empty)
+# Ensure the database file exists and is writable by the user running the app
+# This creates an empty database.db if it wasn't copied (because it didn't exist)
+# and ensures permissions are okay for the app to write to it.
 RUN touch database.db && chmod 777 database.db
 
 # Expose the port Flask/Gunicorn runs on
