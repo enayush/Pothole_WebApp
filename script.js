@@ -6,7 +6,7 @@ const ctx = canvas.getContext('2d');
 
 let model = undefined;
 // !!! REPLACE WITH THE URL OF YOUR DEPLOYED FLASK BACKEND API !!!
-const BACKEND_API_URL = 'YOUR_DEPLOYED_BACKEND_URL';
+const BACKEND_API_URL = 'https://pothole-detector-backend.onrender.com';
 const REPORT_ENDPOINT = `${BACKEND_API_URL}/api/report_detection`;
 const RESULTS_ENDPOINT = `${BACKEND_API_URL}/api/get_results`;
 
@@ -58,16 +58,15 @@ async function predictWebcam() {
     // Preprocess frame (adjust based on YOUR model's requirements)
     // Typically involves resizing, normalizing pixel values
     const tfFrame = tf.browser.fromPixels(video).toFloat();
-    // Example: Resize to a specific size (replace 224, 224 with your model's expected input shape)
-    const resizedFrame = tf.image.resizeBilinear(tfFrame, [224, 224]);
-    // Example: Normalize (adjust mean/std or scale 0-1)
-    // const normalizedFrame = resizedFrame.div(255.0); // Scale 0-1
+    // Resize to the shape expected by the model: [640, 640]
+    const resizedFrame = tf.image.resizeBilinear(tfFrame, [640, 640]); // <-- CHANGE [224, 224] to [640, 640]
+    // Example: Normalize (adjust mean/std or scale 0-1) if your model requires it
+    // const normalizedFrame = resizedFrame.div(255.0);
     // Add batch dimension
-    const inputTensor = resizedFrame.expandDims(0); // Shape [1, H, W, C]
+    const inputTensor = resizedFrame.expandDims(0); // Resulting shape will be [1, 640, 640, 3]
 
-    // --- Run inference ---
-    const predictions = await model.executeAsync(inputTensor); // Use executeAsync for graph models
-
+    // Pass inputTensor to model.execute() or model.predict()
+    const predictions = await model.executeAsync(inputTensor); // Or model.predict(inputTensor);
     // --- Process predictions ---
     // THIS PART IS HIGHLY DEPENDENT ON YOUR MODEL'S OUTPUT
     // Example (for an object detection model outputting bounding boxes, scores, classes):
@@ -141,17 +140,17 @@ function processModelOutput(predictions) {
 
 // Implement this function to draw results on the canvas
 function drawDetections(detectionResult, context) {
-   // Example: If detectionResult is a boolean true/false
-   if (detectionResult) {
-       context.fillStyle = 'red';
-       context.font = '24px Arial';
-       context.fillText('POTHOLE DETECTED!', 10, 30);
-   }
-   // Example: If detectionResult contains bounding boxes and scores
-   // Loop through bounding boxes and draw rectangles on the canvas
-   // ctx.strokeStyle = 'red';
-   // ctx.lineWidth = 2;
-   // ctx.strokeRect(x, y, width, height); // Coordinates need scaling to canvas size
+    // Example: If detectionResult is a boolean true/false
+    if (detectionResult) {
+        context.fillStyle = 'red';
+        context.font = '24px Arial';
+        context.fillText('POTHOLE DETECTED!', 10, 30);
+    }
+    // Example: If detectionResult contains bounding boxes and scores
+    // Loop through bounding boxes and draw rectangles on the canvas
+    // ctx.strokeStyle = 'red';
+    // ctx.lineWidth = 2;
+    // ctx.strokeRect(x, y, width, height); // Coordinates need scaling to canvas size
 }
 
 
@@ -193,8 +192,8 @@ async function fetchHistoricalData() {
     try {
         const response = await fetch(RESULTS_ENDPOINT);
         if (!response.ok) {
-             console.error('Failed to fetch historical data:', response.statusText);
-             return;
+            console.error('Failed to fetch historical data:', response.statusText);
+            return;
         }
         const data = await response.json(); // Expecting JSON like [{timestamp: '...', count: N}, ...]
         console.log("Historical data:", data);
@@ -235,7 +234,7 @@ function updateChart(data) {
                     title: { display: true, text: 'Detections' }
                 },
                 x: {
-                     title: { display: true, text: 'Time' }
+                    title: { display: true, text: 'Time' }
                 }
             }
         }
