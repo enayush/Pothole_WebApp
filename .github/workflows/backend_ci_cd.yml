@@ -33,6 +33,6 @@ jobs:
       with:
         context: ./backend # Point Docker to the backend directory
         push: true
-        tags: your_dockerhub_username/pothole-detector-backend:latest # Replace with your Docker Hub username
+        tags: enayush/pothole-detector-backend:latest # Replace with your Docker Hub username
         # Or for ghcr.io:
         # tags: ghcr.io/${{ github.repository }}/backend:latest # Use ghcr.io naming convention
