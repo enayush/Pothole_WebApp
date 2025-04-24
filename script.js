@@ -139,7 +139,7 @@ async function sendFrameForBackendDetection() {
 
     // Convert the canvas content to a JPEG base64 string
     // Use a quality factor (0 to 1) to balance size and quality for sending
-    const base64Image = tempCanvas.toDataURL('image/jpeg', 0.7); // 0.7 is 70% quality
+    const base64Image = tempCanvas.toDataURL('image/jpeg', 0.7); // Correct variable name
 
     // Clean up temporary canvas
     tempCanvas.remove();
@@ -151,9 +151,8 @@ async function sendFrameForBackendDetection() {
             method: 'POST',
             headers: {
                 'Content-Type': 'application/json',
-                // Include CORS headers if needed, but Flask-CORS on backend handles this
             },
-            body: JSON.stringify({ image: base664Image }), // Send as JSON object with 'image' key
+            body: JSON.stringify({ image: base64Image }), // <-- FIX THIS LINE: use base64Image
         });
 
         // Get the JSON response from the backend
