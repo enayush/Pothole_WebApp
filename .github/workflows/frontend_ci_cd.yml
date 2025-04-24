@@ -1,0 +1,36 @@
+name: Deploy Frontend to GitHub Pages
+
+on:
+  push:
+    branches:
+      - main # Or master
+
+jobs:
+  build-and-deploy:
+    runs-on: ubuntu-latest
+    steps:
+    - name: Checkout 
+      uses: actions/checkout@v3
+      with:
+        # Required for peaceiris/actions-gh-pages
+        fetch-depth: 0 
+
+    - name: Setup Node.js (Needed by gh-pages action)
+      uses: actions/setup-node@v3
+      with:
+        node-version: '18' # Or a recent version
+
+    # If your frontend needs a build step (like Webpack), add it here
+    # - name: Install Dependencies and Build
+    #   working-directory: ./frontend
+    #   run: |
+    #     npm install
+    #     npm run build # Or your build command
+
+    # Deploy to GitHub Pages
+    - name: Deploy to GitHub Pages
+      uses: peaceiris/actions-gh-pages@v3
+      with:
+        github_token: ${{ secrets.GITHUB_TOKEN }}
+        publish_dir: ./frontend # Or your build output directory if you have a build step
+        publish_branch: gh-pages # The branch GitHub Pages serves from

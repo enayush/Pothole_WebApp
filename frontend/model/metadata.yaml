@@ -1,0 +1,19 @@
+description: Ultralytics best model trained on /content/datasets/roboflow/Potholes-Detection-1/data.yaml
+author: Ultralytics
+date: '2025-04-14T11:39:07.815200'
+version: 8.3.107
+license: AGPL-3.0 License (https://ultralytics.com/license)
+docs: https://docs.ultralytics.com
+stride: 32
+task: detect
+batch: 1
+imgsz:
+- 640
+- 640
+names:
+  0: pothole
+args:
+  batch: 1
+  half: false
+  int8: false
+  nms: false
