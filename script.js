@@ -1,306 +1,386 @@
+// frontend/script.js - Final version for Client Camera + Backend Python YOLO Detection
+
 const video = document.getElementById('webcam');
 const canvas = document.getElementById('outputCanvas');
 const statusDiv = document.getElementById('status');
 const resultsDiv = document.getElementById('results');
+const chartCanvas = document.getElementById('resultsChart'); // Assuming you have this for the graph
 const ctx = canvas.getContext('2d');
+const chartCtx = chartCanvas.getContext('2d'); // Context for Chart.js
 
-let model = undefined;
-// !!! REPLACE WITH THE URL OF YOUR DEPLOYED FLASK BACKEND API !!!
-const BACKEND_API_URL = 'https://pothole-detector-backend.onrender.com';
-const REPORT_ENDPOINT = `${BACKEND_API_URL}/api/report_detection`;
-const RESULTS_ENDPOINT = `${BACKEND_API_URL}/api/get_results`;
+// !!! REPLACE WITH THE ACTUAL PUBLIC URL OF YOUR DEPLOYED FLASK BACKEND API !!!
+// This is the URL you got from Render (e.g., https://your-service-name.onrender.com)
+const BACKEND_API_URL = 'https://pothole-detector-backend.onrender.com'; // <-- Update this!
+const DETECT_FRAME_ENDPOINT = `${BACKEND_API_URL}/detect_frame`; // Endpoint to send frames for detection
+const REPORT_ENDPOINT = `${BACKEND_API_URL}/api/report_detection`; // Endpoint to send detection summaries
+const RESULTS_ENDPOINT = `${BACKEND_API_URL}/api/get_results`; // Endpoint to get historical data
 
-// --- 1. Load the TensorFlow.js model ---
-async function loadModel() {
-    statusDiv.innerText = 'Loading model...';
-    try {
-        // tf.loadGraphModel if it's a Graph Model, tf.loadLayersModel otherwise
-        model = await tf.loadGraphModel('./model/model.json');
-        statusDiv.innerText = 'Model loaded successfully!';
-        startWebcam();
-    } catch (error) {
-        statusDiv.innerText = 'Failed to load model: ' + error.message;
-        console.error('Model loading failed:', error);
-    }
-}
+const FPS = 30; // Assume webcam is ~30 FPS
+const DETECTION_INTERVAL_MS = 1000 / 5; // Send a frame for backend detection every ~200ms (5 FPS) - Adjust based on backend load
+const REPORT_INTERVAL_MS = 10000; // Report detection summary to backend every 10 seconds
+const FETCH_RESULTS_INTERVAL_MS = 15000; // Fetch historical results for graphs every 15 seconds
 
-// --- 2. Access the webcam ---
+let lastDetectionSendTime = 0;
+let lastReportTime = 0;
+let lastFetchTime = 0;
+let currentDetectionCount = 0; // Accumulate detection count within a reporting interval
+
+let resultsChart = null; // To hold the Chart.js instance
+let clientLatitude = null;
+let clientLongitude = null;
+
+
+// --- 1. Access the webcam ---
 async function startWebcam() {
+    statusDiv.innerText = 'Accessing webcam...';
     if (!navigator.mediaDevices || !navigator.mediaDevices.getUserMedia) {
         statusDiv.innerText = 'Webcam not supported by your browser.';
         return;
     }
 
     try {
-        const stream = await navigator.mediaDevices.getUserMedia({ video: true });
+        const stream = await navigator.mediaDevices.getUserMedia({ video: { facingMode: 'environment' } }); // Prefer rear camera on mobile
         video.srcObject = stream;
-        video.addEventListener('loadeddata', predictWebcam); // Start prediction once video is ready
+
+        // Adjust canvas size once video metadata is loaded
+        video.addEventListener('loadedmetadata', () => {
+            console.log("Video metadata loaded. Setting canvas size.");
+            canvas.width = video.videoWidth;
+            canvas.height = video.videoHeight;
+             // Set chart canvas dimensions (example)
+            if (chartCanvas) {
+                 chartCanvas.width = video.videoWidth; // Match video width
+                 chartCanvas.height = Math.min(400, window.innerHeight * 0.4); // Example: Max 400px or 40% of screen height
+            }
+            statusDiv.innerText = 'Webcam started. Sending frames for detection...';
+            // Start the main processing/loop function
+            processFrameLoop();
+        });
+
     } catch (error) {
         statusDiv.innerText = 'Error accessing webcam: ' + error.message;
         console.error('Webcam access failed:', error);
     }
 }
 
-// --- 3. Prediction Loop ---
-let lastReportTime = 0;
-const REPORT_INTERVAL_MS = 5000; // Report detection every 5 seconds
+// --- Optional: Get Client Location ---
+function getClientLocation() {
+    if (navigator.geolocation) {
+        navigator.geolocation.getCurrentPosition(
+            (position) => {
+                clientLatitude = position.coords.latitude;
+                clientLongitude = position.coords.longitude;
+                console.log("Client location obtained:", clientLatitude, clientLongitude);
+            },
+            (error) => {
+                console.warn('Could not get client location:', error.message);
+                clientLatitude = null;
+                clientLongitude = null;
+            },
+            { enableHighAccuracy: false, timeout: 5000, maximumAge: 0 } // Options for geolocation
+        );
+    } else {
+        console.warn('Geolocation is not supported by this browser.');
+        clientLatitude = null;
+        clientLongitude = null;
+    }
+}
 
-async function predictWebcam() {
-    if (!model) {
-        requestAnimationFrame(predictWebcam); // Keep trying if model not loaded
+// --- Main Processing Loop ---
+function processFrameLoop() {
+    const now = Date.now();
+
+    // Draw the current video frame onto the canvas
+    ctx.clearRect(0, 0, canvas.width, canvas.height);
+    ctx.drawImage(video, 0, 0, canvas.width, canvas.height);
+
+    // --- Tasks to perform periodically ---
+
+    // 1. Send frame to backend for detection
+    if (now - lastDetectionSendTime > DETECTION_INTERVAL_MS) {
+         lastDetectionSendTime = now;
+         sendFrameForBackendDetection(); // Call the function to capture and send a frame
+    }
+
+    // 2. Report accumulated detection count summary to backend
+    if (now - lastReportTime > REPORT_INTERVAL_MS) {
+        lastReportTime = now;
+        reportDetectionSummary();
+    }
+
+    // 3. Fetch historical data for the graph
+    if (now - lastFetchTime > FETCH_RESULTS_INTERVAL_MS) {
+         lastFetchTime = now;
+         fetchHistoricalData();
+    }
+
+    // Loop the processFrameLoop function using requestAnimationFrame
+    requestAnimationFrame(processFrameLoop);
+}
+
+
+// --- Send Frame to Backend for Detection ---
+async function sendFrameForBackendDetection() {
+     if (video.readyState < 2) { // Check if video is ready
+        console.log("Video not ready to capture frame.");
         return;
     }
 
-    // Set canvas dimensions to video dimensions
-    canvas.width = video.videoWidth;
-    canvas.height = video.videoHeight;
+    // Create a temporary canvas to get image data from the video frame
+    const tempCanvas = document.createElement('canvas');
+    const tempCtx = tempCanvas.getContext('2d');
 
-    // Preprocess frame (adjust based on YOUR model's requirements)
-    // Typically involves resizing, normalizing pixel values
-    const tfFrame = tf.browser.fromPixels(video).toFloat();
-    // Resize to the shape expected by the model: [640, 640]
-    const resizedFrame = tf.image.resizeBilinear(tfFrame, [640, 640]); // <-- CHANGE [224, 224] to [640, 640]
-    // Example: Normalize (adjust mean/std or scale 0-1) if your model requires it
-    // const normalizedFrame = resizedFrame.div(255.0);
-    // Add batch dimension
-    const inputTensor = resizedFrame.expandDims(0); // Resulting shape will be [1, 640, 640, 3]
+    // Ensure temporary canvas matches current video frame size
+    tempCanvas.width = video.videoWidth;
+    tempCanvas.height = video.videoHeight;
 
-    // Pass inputTensor to model.execute() or model.predict()
-    const predictions = await model.executeAsync(inputTensor); // Or model.predict(inputTensor);
-    // --- Process predictions ---
-    // THIS PART IS HIGHLY DEPENDENT ON YOUR MODEL'S OUTPUT
-    // Example (for an object detection model outputting bounding boxes, scores, classes):
-    // const [boxes, scores, classes] = predictions;
-    // You'll need logic here to filter detections by score, map class IDs to names, etc.
+    // Draw the current video frame onto the temporary canvas
+    tempCtx.drawImage(video, 0, 0, tempCanvas.width, tempCanvas.height);
 
-    // For simplicity, let's just assume it outputs a single value indicating "pothole count" or "pothole confidence"
-    const potholesDetected = processModelOutput(predictions); // Implement this function
+    // Convert the canvas content to a JPEG base64 string
+    // Use a quality factor (0 to 1) to balance size and quality for sending
+    const base64Image = tempCanvas.toDataURL('image/jpeg', 0.7); // 0.7 is 70% quality
 
-    // Dispose tensors to free up memory
-    tfFrame.dispose();
-    resizedFrame.dispose();
-    inputTensor.dispose();
-    // Dispose of tensors returned by model.executeAsync() if you don't need them further
-    predictions.forEach(p => p.dispose());
-
-
-    // --- Display results on canvas ---
-    // Clear canvas and draw current video frame
-    ctx.clearRect(0, 0, canvas.width, canvas.height);
-    ctx.drawImage(video, 0, 0, canvas.width, canvas.height);
-    // Draw bounding boxes based on predictions (implement this logic)
-    drawDetections(potholesDetected, ctx);
-
-
-    // --- Display text results ---
-    resultsDiv.innerText = `Potholes Detected: ${potholesDetected ? 'Yes' : 'No'}`; // Adjust based on how you represent detection
-
-    // --- Report results to backend periodically ---
-    const now = Date.now();
-    if (now - lastReportTime > REPORT_INTERVAL_MS) {
-        reportDetection(potholesDetected); // Implement this function
-        lastReportTime = now;
-    }
-
-    // Loop the prediction
-    requestAnimationFrame(predictWebcam);
-}
-
-// Implement this function based on your model's output
-function processModelOutput(predictions) {
-    // --- Step 1: Log and inspect the 'predictions' variable ---
-    console.log("--- Inspecting TF.js predictions ---");
-    console.log("Predictions variable type:", typeof predictions);
-    console.log("Is predictions an Array?", Array.isArray(predictions));
-
-    if (Array.isArray(predictions)) {
-        console.log("Predictions is an array. Length:", predictions.length);
-        // If it's an array, iterate through items and log their types/shapes
-        predictions.forEach((tensor, index) => {
-            console.log(`  Item ${index}:`, tensor);
-            if (tensor && typeof tensor.shape !== 'undefined') {
-                console.log(`    Shape:`, tensor.shape);
-                console.log(`    Is Tensor?`, tensor instanceof tf.Tensor);
-                // WARNING: Calling .arraySync() or .dataSync() on large tensors can freeze the browser!
-                // Only use on small or known tensors for debugging.
-                // console.log(`    Data (first few):`, tensor.dataSync().slice(0, 10));
-            } else {
-                console.log("    Item is not a Tensor or has no shape.");
-            }
-        });
-    } else if (predictions && typeof predictions.shape !== 'undefined') {
-        console.log("Predictions is a single Tensor.");
-        console.log("  Shape:", predictions.shape);
-        console.log(`  Is Tensor?`, predictions instanceof tf.Tensor);
-        // WARNING: Calling .arraySync() or .dataSync() on large tensors can freeze the browser!
-        // Only use on small or known tensors for debugging.
-        // console.log(`    Data (first few):`, predictions.dataSync().slice(0, 10));
-    } else {
-        console.log("Predictions is not an array or a Tensor:", predictions);
-    }
-    console.log("--- End Inspection ---");
-
-
-    // --- Step 2: Based on console output, write the actual logic ---
-    // This part MUST be written by you after you see the console logs from Step 1.
-    // Example (assuming it returns an array where the first item is scores and second is boxes):
-    // if (Array.isArray(predictions) && predictions.length >= 2 &&
-    //     predictions[0] instanceof tf.Tensor && predictions[1] instanceof tf.Tensor) {
-    //     const scores = predictions[0].dataSync(); // Get scores as a JS array
-    //     const boxes = predictions[1].dataSync();   // Get boxes as a JS array (flat array)
-    //     // Now loop through scores and boxes to find detections above a threshold
-    //     let detected_count = 0;
-    //     let primary_bbox = null;
-    //     let primary_confidence = null;
-    //     const threshold = 0.5; // Match your model's expected threshold or adjust
-    //     for (let i = 0; i < scores.length; i++) {
-    //         if (scores[i] > threshold) {
-    //             detected_count++;
-    //             if (primary_bbox === null) {
-    //                 // Assuming boxes are [y1, x1, y2, x2] or [x1, y1, x2, y2] in normalized [0,1] format
-    //                 // You'll need to know your model's output format!
-    //                 const box = boxes.slice(i * 4, i * 4 + 4); // Extract box coords for this detection
-    //                 // Convert normalized coords [0,1] to pixel coords [0, videoWidth/Height]
-    //                 const videoWidth = video.videoWidth;
-    //                 const videoHeight = video.videoHeight;
-    //                 // Example for [y1, x1, y2, x2] format:
-    //                 // const x_min = box[1] * videoWidth;
-    //                 // const y_min = box[0] * videoHeight;
-    //                 // const x_max = box[3] * videoWidth;
-    //                 // const y_max = box[2] * videoHeight;
-    //                 // Example for [x1, y1, x2, y2] format:
-    //                 const x_min = box[0] * videoWidth;
-    //                 const y_min = box[1] * videoHeight;
-    //                 const x_max = box[2] * videoWidth;
-    //                 const y_max = box[3] * videoHeight;
-    //                 primary_bbox = [x_min, y_min, x_max, y_max]; // Store as pixel values
-    //                 primary_confidence = scores[i];
-    //             }
-    //         }
-    //     }
-    //     // Return structure expected by displayDetectionResults if it's called with this output
-    //     // Or just return the processed data you need for your logic
-    //     return { detection_count: detected_count, primary_bbox: primary_bbox, primary_confidence: primary_confidence };
-
-    // } else {
-    //    console.warn("Unexpected predictions format:", predictions);
-    return { detection_count: 0, primary_bbox: null, primary_confidence: null }; // Return no detections if format is unexpected
-    // }
-
-
-    // --- Step 3: Remove or comment out Step 1 logging once you know the structure ---
-    // And uncomment Step 2 logic.
-
-    // *** Placeholder return (will not work) ***
-    // const probability = predictions[0].dataSync()[0]; // REMOVE or COMMENT OUT
-    // return probability > 0.5; // REMOVE or COMMENT OUT
-}
-
-// Implement this function to draw results on the canvas
-function drawDetections(detectionResult, context) {
-    // Example: If detectionResult is a boolean true/false
-    if (detectionResult) {
-        context.fillStyle = 'red';
-        context.font = '24px Arial';
-        context.fillText('POTHOLE DETECTED!', 10, 30);
-    }
-    // Example: If detectionResult contains bounding boxes and scores
-    // Loop through bounding boxes and draw rectangles on the canvas
-    // ctx.strokeStyle = 'red';
-    // ctx.lineWidth = 2;
-    // ctx.strokeRect(x, y, width, height); // Coordinates need scaling to canvas size
-}
-
-
-// --- 4. Report Detection to Backend ---
-async function reportDetection(isPotholeDetected) {
-    if (!isPotholeDetected) return; // Only report if detected
+    // Clean up temporary canvas
+    tempCanvas.remove();
 
     try {
-        const response = await fetch(REPORT_ENDPOINT, {
+        // Send the base64 image data to the backend detection endpoint
+        console.log("Sending frame for detection...");
+        const response = await fetch(DETECT_FRAME_ENDPOINT, {
             method: 'POST',
             headers: {
                 'Content-Type': 'application/json',
+                // Include CORS headers if needed, but Flask-CORS on backend handles this
             },
-            body: JSON.stringify({
-                timestamp: new Date().toISOString(),
-                // Add location data if you can get it (requires browser location API)
-                // latitude: ...,
-                // longitude: ...,
-                // Or simplify: just send a count or a boolean
-                detected: isPotholeDetected // Or a count if your processModelOutput gives a number
-            }),
+            body: JSON.stringify({ image: base664Image }), // Send as JSON object with 'image' key
         });
 
-        if (!response.ok) {
-            console.error('Failed to report detection:', response.statusText);
+        // Get the JSON response from the backend
+        const result = await response.json();
+
+        if (response.ok) {
+            // Process and display detection results received from backend
+            // Expected result format: { status: "success", detection_count: N, primary_bbox: [x_min, y_min, x_max, y_max] or null, primary_confidence: float or null }
+            console.log("Detection result from backend:", result);
+            displayDetectionResults(result); // Call function to update UI based on backend result
+
+            // Accumulate count for the reporting interval
+            if (result.detection_count > 0) {
+                 currentDetectionCount += result.detection_count;
+            }
+
         } else {
-            console.log('Detection reported successfully.');
+            // Handle errors from the backend (e.g., 500 Internal Server Error, 400 Bad Request)
+            console.error('Backend detection failed:', result.error || response.statusText);
+            resultsDiv.innerText = `Detection Error: ${result.error || response.statusText}`;
+             // Display error status visually if needed
+             // ctx.font = '16px Arial';
+             // ctx.fillStyle = 'red';
+             // ctx.fillText('Backend Error!', 10, canvas.height - 10);
+
         }
     } catch (error) {
-        console.error('Error reporting detection:', error);
-        // Handle potential CORS issues or network problems
+        // Handle network errors (e.g., backend is down, CORS issue not handled)
+        console.error('Error sending frame for detection or receiving response:', error);
+        resultsDiv.innerText = `Connection Error: ${error.message}. Check Backend URL & CORS.`;
+         // Display connection error status visually
+         // ctx.font = '16px Arial';
+         // ctx.fillStyle = 'orange';
+         // ctx.fillText('Connection Error!', 10, canvas.height - 10);
     }
 }
 
-// --- 5. Fetch Historical Data & Draw Graph ---
-let resultsChart = null;
 
+// --- Display Detection Results from Backend ---
+function displayDetectionResults(result) {
+    // This function receives the object returned by the backend's /detect_frame API
+    // result is expected to be like: { detection_count: N, primary_bbox: [x_min, y_min, x_max, y_max] or null, primary_confidence: float or null }
+
+    const { detection_count, primary_bbox, primary_confidence } = result;
+
+    // Update text status
+    resultsDiv.innerText = `Found: ${detection_count} Potholes. Confidence: ${primary_confidence !== null ? primary_confidence.toFixed(2) : 'N/A'}`;
+
+    // Clear any previous drawings *on the canvas context* (the frame is redrawn every loop)
+    // We need to clear only the drawing layer if we were using separate canvas for drawing
+    // But since we draw frame then boxes on the *same* canvas, drawing frame clears old boxes
+    // We might just clear potential previous error text drawn directly on canvas
+
+    // Redraw the frame (already done in processFrameLoop, so no need here)
+    // ctx.clearRect(0, 0, canvas.width, canvas.height);
+    // ctx.drawImage(video, 0, 0, canvas.width, canvas.height);
+
+
+    // Draw bounding box if detection_count > 0 AND bbox is provided
+    if (detection_count > 0 && primary_bbox && Array.isArray(primary_bbox) && primary_bbox.length === 4) {
+        const [x_min, y_min, x_max, y_max] = primary_bbox;
+
+        // Draw the bounding box
+        ctx.strokeStyle = 'red'; // Red box color
+        ctx.lineWidth = 2; // Box line width
+        ctx.strokeRect(x_min, y_min, x_max - x_min, y_max - y_min); // Draw rectangle
+
+        // Optional: Draw confidence score text near the box
+        if (primary_confidence !== null) {
+             const confidenceText = primary_confidence.toFixed(2);
+             const textX = x_min;
+             const textY = y_min > 10 ? y_min - 5 : y_max + 15; // Position text above or below box
+             ctx.font = '16px Arial';
+             ctx.fillStyle = 'red';
+             ctx.fillText(confidenceText, textX, textY);
+        }
+
+    }
+    // No need to explicitly draw "POTHOLE DETECTED" text if you have count and box
+    // You can add it here if detection_count > 0:
+    // if (detection_count > 0) {
+    //      ctx.font = '24px Arial';
+    //      ctx.fillStyle = 'red';
+    //      ctx.fillText('POTHOLE DETECTED!', 10, 30);
+    // }
+}
+
+
+// --- Report Detection Summary to Backend ---
+async function reportDetectionSummary() {
+     // Only report if there has been at least one detection in the last interval
+     if (currentDetectionCount === 0) {
+         // console.log("No potholes detected in this interval, not reporting.");
+         return; // Don't send a report if count is 0
+     }
+
+     try {
+         console.log(`Reporting ${currentDetectionCount} detections summary...`);
+         const response = await fetch(REPORT_ENDPOINT, {
+             method: 'POST',
+             headers: {
+                 'Content-Type': 'application/json',
+             },
+             body: JSON.stringify({
+                 timestamp: new Date().toISOString(), // ISO 8601 format for backend
+                 detected_count: currentDetectionCount, // Send the accumulated count
+                 latitude: clientLatitude, // Send client location if available
+                 longitude: clientLongitude
+             }),
+         });
+
+         if (!response.ok) {
+             console.error('Failed to report detection summary:', response.statusText);
+         } else {
+             console.log(`Successfully reported ${currentDetectionCount} detections.`);
+             // Reset the counter after successful reporting
+             currentDetectionCount = 0;
+         }
+     } catch (error) {
+         console.error('Error reporting detection summary:', error);
+     }
+}
+
+
+// --- Fetch Historical Data & Draw Graph ---
 async function fetchHistoricalData() {
     try {
+        console.log("Fetching historical data...");
         const response = await fetch(RESULTS_ENDPOINT);
         if (!response.ok) {
-            console.error('Failed to fetch historical data:', response.statusText);
-            return;
+             console.error('Failed to fetch historical data:', response.statusText);
+             return;
         }
-        const data = await response.json(); // Expecting JSON like [{timestamp: '...', count: N}, ...]
-        console.log("Historical data:", data);
-        updateChart(data);
+        const data = await response.json(); // Expecting JSON like [{timestamp: '...', detected_count: N, ...}, ...]
+        console.log("Historical data received:", data);
+
+        if (chartCanvas) { // Only update chart if chartCanvas exists
+            updateChart(data);
+        } else {
+             console.warn("Chart canvas element not found.");
+        }
+
 
     } catch (error) {
         console.error('Error fetching historical data:', error);
     }
 }
 
+// Function to update the Chart.js graph
 function updateChart(data) {
-    const labels = data.map(item => new Date(item.timestamp).toLocaleTimeString());
-    const detectionCounts = data.map(item => item.count || (item.detected ? 1 : 0)); // Adapt based on your backend data structure
+    // Prepare data for Chart.js
+    const labels = data.map(item => new Date(item.timestamp).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', second: '2-digit' })); // Format time nicely with seconds
+    const detectionCounts = data.map(item => item.detected_count || 0); // Ensure it's a number, default to 0 if missing
 
-    const ctx = document.getElementById('resultsChart').getContext('2d');
+    const chartContext = chartCanvas.getContext('2d'); // Get context again
 
     if (resultsChart) {
-        resultsChart.destroy(); // Destroy previous chart instance
+        resultsChart.destroy(); // Destroy previous chart instance to update it
     }
 
-    resultsChart = new Chart(ctx, {
-        type: 'line', // Or 'bar'
+    resultsChart = new Chart(chartContext, {
+        type: 'bar', // Bar chart might be better for counts over time intervals
         data: {
             labels: labels,
             datasets: [{
-                label: '# of Potholes Detected (Approx)', // Adjust label
+                label: 'Potholes Reported (Count)',
                 data: detectionCounts,
-                backgroundColor: 'rgba(255, 99, 132, 0.2)',
-                borderColor: 'rgba(255, 99, 132, 1)',
-                borderWidth: 1,
-                fill: false // Don't fill area under the line
+                backgroundColor: 'rgba(255, 159, 64, 0.7)', // Orange/Yellow color, slightly opaque
+                borderColor: 'rgba(255, 159, 64, 1)',
+                borderWidth: 1
             }]
         },
         options: {
             scales: {
                 y: {
                     beginAtZero: true,
-                    title: { display: true, text: 'Detections' }
+                    title: { display: true, text: 'Number of Potholes' },
+                    ticks: {
+                        stepSize: 1 // Show integer ticks for counts
+                    }
                 },
                 x: {
-                    title: { display: true, text: 'Time' }
+                     title: { display: true, text: 'Time Reported' },
+                     // Options for handling many labels if needed
+                     autoSkip: true, // Automatically skip labels if they overlap
+                     maxTicksLimit: 10 // Limit number of labels on x-axis
+                     // maxRotation: 90,
+                     // minRotation: 0
                 }
-            }
+            },
+            plugins: {
+                legend: {
+                    display: true // Show legend
+                },
+                title: {
+                    display: true,
+                    text: 'Pothole Detections Over Time' // Chart title
+                },
+                tooltip: {
+                    callbacks: {
+                        // Custom tooltip to show timestamp more clearly
+                        title: function(context) {
+                             if (context && context.length > 0 && data[context[0].dataIndex]) {
+                                 return new Date(data[context[0].dataIndex].timestamp).toLocaleString(); // Show full date/time
+                             }
+                             return '';
+                        }
+                        // You can add other callbacks for label, footer etc.
+                    }
+                }
+            },
+             responsive: true, // Chart resizes with container
+             maintainAspectRatio: false // Allow controlling size via CSS or attributes
         }
     });
 }
 
-// --- Initialize ---
-loadModel();
-// Fetch historical data initially and then periodically
+
+// --- Initialize Application ---
+// Start the webcam, which will then trigger the processFrameLoop
+startWebcam();
+
+// Attempt to get client location (runs asynchronously)
+getClientLocation();
+
+// Fetch historical data initially
 fetchHistoricalData();
-setInterval(fetchHistoricalData, 10000); // Fetch data every 10 seconds
+
+// The processFrameLoop now handles sending frames, reporting summaries, and fetching history periodically.
+// We removed the separate setIntervals for fetch/report.
