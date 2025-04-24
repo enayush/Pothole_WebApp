@@ -1,0 +1,25 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <title>Pothole Detector</title>
+    <link rel="stylesheet" href="style.css">
+    <!-- Include TensorFlow.js -->
+    <script src="https://cdn.jsdelivr.net/npm/@tensorflow/tfjs@latest/dist/tf.min.js"></script>
+    <!-- Include Chart.js -->
+    <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+</head>
+<body>
+    <h1>Pothole Detector</h1>
+    <div class="video-container">
+        <video id="webcam" autoplay playsinline></video>
+        <canvas id="outputCanvas"></canvas>
+    </div>
+    <div id="status">Loading model...</div>
+    <div id="results">Latest Detection: None</div>
+
+    <h2>Historical Data</h2>
+    <canvas id="resultsChart"></canvas>
+
+    <script src="script.js"></script>
+</body>
+</html>
