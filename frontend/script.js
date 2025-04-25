@@ -383,3 +383,12 @@ fetchHistoricalData();
 
 // The processFrameLoop now handles sending frames, reporting summaries, and fetching history periodically.
 // We removed the separate setIntervals for fetch/report.
+// TEMPORARY TEST: Start the loop after a delay instead of on loadedmetadata
+setTimeout(() => {
+    console.log("Attempting to manually start processFrameLoop after delay...");
+    if (video.readyState >= 2) { // Check if video is ready
+         processFrameLoop();
+    } else {
+         console.error("Video not ready after delay, cannot start loop.");
+    }
+ }, 3000); 
