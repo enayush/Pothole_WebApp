@@ -1,25 +1,91 @@
 <!DOCTYPE html>
-<html>
+<html lang="en">
 <head>
-    <title>Pothole Detector</title>
-    <link rel="stylesheet" href="style.css">
-    <!-- Include TensorFlow.js -->
-    <script src="https://cdn.jsdelivr.net/npm/@tensorflow/tfjs@latest/dist/tf.min.js"></script>
-    <!-- Include Chart.js -->
-    <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Pothole Detection App</title>
+    <style>
+        body {
+            font-family: Arial, sans-serif;
+            margin: 0;
+            padding: 20px;
+            background-color: #f4f4f4;
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            text-align: center;
+        }
+        h1 {
+            color: #333;
+            margin-bottom: 10px;
+        }
+        .container {
+            max-width: 800px;
+            width: 100%;
+        }
+        #webcam, #outputCanvas {
+            width: 100%;
+            max-width: 640px;
+            height: auto;
+            border: 2px solid #333;
+            border-radius: 8px;
+            margin-bottom: 10px;
+        }
+        #outputCanvas {
+            position: absolute;
+            top: 0;
+            left: 0;
+            pointer-events: none; /* Allow clicks to pass through to video */
+        }
+        .video-container {
+            position: relative;
+            display: inline-block;
+            margin-bottom: 10px;
+        }
+        #status, #results {
+            background-color: #fff;
+            padding: 10px;
+            border-radius: 5px;
+            margin-bottom: 10px;
+            box-shadow: 0 2px 4px rgba(0, 0, 0, 0.1);
+            word-wrap: break-word;
+        }
+        #resultsChart {
+            max-width: 640px;
+            width: 100%;
+            height: 300px;
+            margin-top: 20px;
+        }
+        p {
+            color: #555;
+            margin: 5px 0;
+        }
+        @media (max-width: 600px) {
+            body {
+                padding: 10px;
+            }
+            #webcam, #outputCanvas, #resultsChart {
+                max-width: 100%;
+            }
+        }
+    </style>
 </head>
 <body>
-    <h1>Pothole Detector</h1>
-    <div class="video-container">
-        <video id="webcam" autoplay playsinline></video>
-        <canvas id="outputCanvas"></canvas>
+    <div class="container">
+        <h1>Pothole Detection App</h1>
+        <p>Press <strong>Spacebar</strong> to pause/resume detection.</p>
+        <div class="video-container">
+            <video id="webcam" autoplay playsinline></video>
+            <canvas id="outputCanvas"></canvas>
+        </div>
+        <div id="status">Initializing...</div>
+        <div id="results">Waiting for detection results...</div>
+        <canvas id="resultsChart"></canvas>
     </div>
-    <div id="status">Loading model...</div>
-    <div id="results">Latest Detection: None</div>
 
-    <h2>Historical Data</h2>
-    <canvas id="resultsChart"></canvas>
-
+    <!-- Load Chart.js for historical data visualization -->
+    <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.0/dist/chart.umd.min.js"></script>
+    <!-- Load the improved script.js -->
     <script src="script.js"></script>
 </body>
 </html>
